@@ -166,6 +166,93 @@ Go to your GitHub repository → Settings → Secrets and variables → Actions,
 
 ### 6. Test the API
 
+#### Option A: Using Postman (Recommended)
+
+A Postman collection is available for easy API testing:
+
+**Postman Workspace**: [https://restless-escape-927953.postman.co/workspace/e98834f7-b03d-481e-8380-307ee463151c](https://restless-escape-927953.postman.co/workspace/e98834f7-b03d-481e-8380-307ee463151c)
+
+##### Setup Postman Environment
+
+1. Import the Postman collection from the workspace link above
+2. Create a new Environment in Postman with the following variables:
+   - `api_url`: Your API Gateway URL (from CloudFormation outputs)
+   - `user_pool_id`: Cognito User Pool ID (from CloudFormation outputs)
+   - `client_id`: Cognito Client ID (from CloudFormation outputs)
+   - `email`: Your Cognito user email
+   - `password`: Your Cognito user password
+   - `access_token`: (Will be automatically set after authentication)
+
+##### Postman Collection Endpoints
+
+1. **Auth - Login**
+   - Method: `POST`
+   - URL: `https://cognito-idp.us-east-1.amazonaws.com/`
+   - Headers:
+     - `Content-Type: application/x-amz-json-1.1`
+     - `X-Amz-Target: AWSCognitoIdentityProviderService.InitiateAuth`
+   - Body (raw JSON):
+     ```json
+     {
+       "AuthFlow": "USER_PASSWORD_AUTH",
+       "ClientId": "{{client_id}}",
+       "AuthParameters": {
+         "USERNAME": "{{email}}",
+         "PASSWORD": "{{password}}"
+       }
+     }
+     ```
+   - Test Script (saves token automatically):
+     ```javascript
+     if (pm.response.code === 200) {
+         var jsonData = pm.response.json();
+         pm.environment.set("access_token", jsonData.AuthenticationResult.IdToken);
+         pm.environment.set("id_token", jsonData.AuthenticationResult.IdToken);
+         pm.environment.set("refresh_token", jsonData.AuthenticationResult.RefreshToken);
+     }
+     ```
+
+2. **Health Check**
+   - Method: `GET`
+   - URL: `{{api_url}}/health`
+   - No authentication required
+
+3. **Get Profile**
+   - Method: `GET`
+   - URL: `{{api_url}}/profile`
+   - Headers: `Authorization: Bearer {{access_token}}`
+
+4. **Update Profile**
+   - Method: `PUT`
+   - URL: `{{api_url}}/profile`
+   - Headers:
+     - `Authorization: Bearer {{access_token}}`
+     - `Content-Type: application/json`
+   - Body (raw JSON):
+     ```json
+     {
+       "first_name": "John",
+       "last_name": "Doe"
+     }
+     ```
+   - **Important**: Make sure `Content-Type` is set to `application/json` in the Headers tab
+
+5. **Get System Secret**
+   - Method: `GET`
+   - URL: `{{api_url}}/system/secret`
+   - Headers: `Authorization: Bearer {{access_token}}`
+
+##### Postman Usage Flow
+
+1. Configure the Environment variables with your API URL, Cognito IDs, and credentials
+2. Run "Auth - Login" to authenticate and automatically save the token
+3. Run other endpoints - they will automatically use the saved token
+4. If token expires, run "Auth - Login" again to refresh
+
+**Note**: Use the `IdToken` (not `AccessToken`) for API authentication. The Postman collection automatically uses the correct token.
+
+#### Option B: Using cURL
+
 #### Step 1: Create a Test User in Cognito
 
 ```bash
