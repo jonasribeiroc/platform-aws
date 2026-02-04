@@ -1,0 +1,102 @@
+name: Deploy to AWS ECS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REPOSITORY: user-profile-api
+  ECS_SERVICE: user-profile-api-service
+  ECS_CLUSTER: user-profile-api-cluster
+  ECS_TASK_DEFINITION: user-profile-api-task
+  CONTAINER_NAME: api
+
+jobs:
+  deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          # Build Docker image
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG ./backend
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          # Push both tags
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Get CloudFormation stack name
+        id: get-stack
+        run: |
+          # Extract stack name from CloudFormation outputs or use a default
+          # You may need to adjust this based on your stack naming convention
+          STACK_NAME=$(aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE --query "StackSummaries[?contains(StackName, 'user-profile')].StackName" --output text | head -n 1)
+          if [ -z "$STACK_NAME" ]; then
+            STACK_NAME="user-profile-api"
+          fi
+          echo "STACK_NAME=$STACK_NAME" >> $GITHUB_OUTPUT
+          echo "Using stack: $STACK_NAME"
+
+      - name: Update ECS Task Definition and Service
+        run: |
+          STACK_NAME="${{ steps.get-stack.outputs.STACK_NAME }}"
+          CLUSTER_NAME="${STACK_NAME}-cluster"
+          SERVICE_NAME="${STACK_NAME}-service"
+          TASK_FAMILY="${STACK_NAME}-task"
+          IMAGE_URI="${{ steps.build-image.outputs.image }}"
+          
+          # Get current task definition
+          TASK_DEF=$(aws ecs describe-task-definition --task-definition $TASK_FAMILY --query 'taskDefinition')
+          
+          # Create new task definition with updated image
+          NEW_TASK_DEF=$(echo $TASK_DEF | jq --arg IMAGE "$IMAGE_URI" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn) | del(.revision) | del(.status) | del(.requiresAttributes) | del(.compatibilities) | del(.registeredAt) | del(.registeredBy)')
+          
+          # Register new task definition
+          aws ecs register-task-definition --cli-input-json "$NEW_TASK_DEF" > /dev/null
+          
+          # Get the new task definition revision
+          NEW_REVISION=$(aws ecs describe-task-definition --task-definition $TASK_FAMILY --query 'taskDefinition.revision' --output text)
+          
+          # Update the service
+          aws ecs update-service \
+            --cluster $CLUSTER_NAME \
+            --service $SERVICE_NAME \
+            --task-definition $TASK_FAMILY:$NEW_REVISION \
+            --force-new-deployment
+          
+          echo "Deployment initiated. New task definition revision: $NEW_REVISION"
+          
+          # Wait for service to stabilize
+          echo "Waiting for service to stabilize..."
+          aws ecs wait services-stable \
+            --cluster $CLUSTER_NAME \
+            --services $SERVICE_NAME
+          
+          echo "Deployment completed successfully!"
+
