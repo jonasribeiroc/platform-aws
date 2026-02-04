@@ -100,3 +100,38 @@ jobs:
           
           echo "Deployment completed successfully!"
 
+      - name: Get and log API Gateway URL
+        run: |
+          STACK_NAME="${{ steps.get-stack.outputs.STACK_NAME }}"
+          
+          echo "=== 🚀 Deployment Complete ==="
+          echo ""
+          
+          API_URL=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --query 'Stacks[0].Outputs[?OutputKey==`APIGatewayURL`].OutputValue' \
+            --output text \
+            --region ${{ secrets.AWS_REGION }})
+          
+          if [ ! -z "$API_URL" ] && [ "$API_URL" != "None" ]; then
+            echo "✅ API Gateway URL: $API_URL"
+            echo ""
+            echo "📋 Available endpoints:"
+            echo "   • Health: $API_URL/health"
+            echo "   • Profile (GET): $API_URL/profile"
+            echo "   • Profile (PUT): $API_URL/profile"
+            echo "   • System Secret: $API_URL/system/secret"
+            echo ""
+            echo "🔐 Note: Profile and System endpoints require Cognito authentication"
+          else
+            echo "⚠️  API Gateway URL not found in stack outputs"
+          fi
+          
+          echo ""
+          echo "📊 Stack Outputs:"
+          aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --query 'Stacks[0].Outputs[*].[OutputKey,OutputValue]' \
+            --output table \
+            --region ${{ secrets.AWS_REGION }}
+
