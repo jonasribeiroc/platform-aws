@@ -6,8 +6,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies (usar install se ci falhar)
+RUN npm ci || npm install
 
 # Copy source code
 COPY tsconfig.json ./
@@ -27,7 +27,7 @@ RUN addgroup -g 1001 -S nodejs && \
 
 # Copy package files and install production dependencies only
 COPY package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --only=production || npm install --only=production && npm cache clean --force
 
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
