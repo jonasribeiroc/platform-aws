@@ -401,7 +401,7 @@ Resources:
             - Name: DB_USER
               Value: dbadmin
             - Name: DB_SSL
-              Value: 'false'
+              Value: 'true'
             - Name: COGNITO_USER_POOL_ID
               Value: !Ref UserPool
             - Name: COGNITO_CLIENT_ID
